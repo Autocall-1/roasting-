@@ -6,9 +6,14 @@ if (!process.env.GEMINI_API_KEY) {
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-// Free-tier friendly model. Swap to gemini-2.0-flash / gemini-1.5-flash as needed.
+// Model name is configurable via env so it can be swapped (e.g. if a given
+// project's free tier hasn't been granted quota for the default model yet)
+// without touching code — just update GEMINI_MODEL on Render and redeploy.
+const modelName = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+console.log(`[Gemini] Using model: ${modelName}`);
+
 const model = genAI.getGenerativeModel({
-  model: 'gemini-2.0-flash',
+  model: modelName,
   generationConfig: {
     responseMimeType: 'application/json',
   },
