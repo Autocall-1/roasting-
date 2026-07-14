@@ -1,4 +1,4 @@
-const { supabaseAdmin } = require('../config/supabase');
+const { db, admin } = require('../config/firebase');
 const { runEntertainmentEngine } = require('../services/gemini.service');
 const { PROMPTS } = require('../prompts/entertainment.prompts');
 
@@ -18,15 +18,11 @@ async function runFeature(req, res) {
     }
 
     // Confirm the photo belongs to this user
-    const { data: photo, error: photoErr } = await supabaseAdmin
-      .from('photos')
-      .select('id, cloudinary_url, user_id')
-      .eq('id', photoId)
-      .single();
-
-    if (photoErr || !photo) {
+    const photoDoc = await db.collection('photos').doc(photoId).get();
+    if (!photoDoc.exists) {
       return res.status(404).json({ error: 'photo_not_found' });
     }
+    const photo = photoDoc.data();
     if (photo.user_id !== userId) {
       return res.status(403).json({ error: 'not_your_photo' });
     }
@@ -34,24 +30,23 @@ async function runFeature(req, res) {
     const promptText = PROMPTS[feature];
     const result = await runEntertainmentEngine(promptText, photo.cloudinary_url);
 
-    const { data: saved, error: saveErr } = await supabaseAdmin
-      .from('entertainment_results')
-      .insert({
+    let savedId = null;
+    let saved = true;
+    try {
+      const docRef = await db.collection('entertainment_results').add({
         user_id: userId,
         photo_id: photoId,
         feature,
         result,
-      })
-      .select()
-      .single();
-
-    if (saveErr) {
+        created_at: admin.firestore.FieldValue.serverTimestamp(),
+      });
+      savedId = docRef.id;
+    } catch (saveErr) {
       console.error('Save error:', saveErr);
-      // Still return the result to the user even if saving history failed
-      return res.status(200).json({ feature, result, saved: false });
+      saved = false; // Still return the result to the user even if saving history failed
     }
 
-    res.status(200).json({ feature, result, saved: true, id: saved.id });
+    res.status(200).json({ feature, result, saved, id: savedId });
   } catch (err) {
     console.error('runFeature error:', err);
     res.status(500).json({ error: 'engine_failed', message: err.message });
@@ -61,14 +56,14 @@ async function runFeature(req, res) {
 async function getHistory(req, res) {
   try {
     const userId = req.user.id;
-    const { data, error } = await supabaseAdmin
-      .from('entertainment_results')
-      .select('*')
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false });
+    const snap = await db
+      .collection('entertainment_results')
+      .where('user_id', '==', userId)
+      .orderBy('created_at', 'desc')
+      .get();
 
-    if (error) throw error;
-    res.status(200).json({ history: data });
+    const history = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    res.status(200).json({ history });
   } catch (err) {
     console.error('getHistory error:', err);
     res.status(500).json({ error: 'history_fetch_failed' });
@@ -92,14 +87,21 @@ function extractScores(obj, acc = []) {
 async function getDashboard(req, res) {
   try {
     const userId = req.user.id;
-    const { data, error } = await supabaseAdmin
-      .from('entertainment_results')
-      .select('feature, result, created_at')
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false })
-      .limit(50);
+    const snap = await db
+      .collection('entertainment_results')
+      .where('user_id', '==', userId)
+      .orderBy('created_at', 'desc')
+      .limit(50)
+      .get();
 
-    if (error) throw error;
+    const data = snap.docs.map((d) => {
+      const doc = d.data();
+      return {
+        id: d.id,
+        ...doc,
+        created_at: doc.created_at?.toDate ? doc.created_at.toDate().toISOString() : doc.created_at,
+      };
+    });
 
     const allScores = [];
     const featureCounts = {};

@@ -1,5 +1,5 @@
 const cloudinary = require('../config/cloudinary');
-const { supabaseAdmin } = require('../config/supabase');
+const { db, admin } = require('../config/firebase');
 
 async function uploadPhoto(req, res) {
   try {
@@ -18,24 +18,16 @@ async function uploadPhoto(req, res) {
       stream.end(req.file.buffer);
     });
 
-    const { data: photo, error: dbErr } = await supabaseAdmin
-      .from('photos')
-      .insert({
-        user_id: userId,
-        cloudinary_public_id: uploadResult.public_id,
-        cloudinary_url: uploadResult.secure_url,
-      })
-      .select()
-      .single();
-
-    if (dbErr) {
-      console.error('Photo DB insert error:', dbErr);
-      return res.status(500).json({ error: 'photo_save_failed' });
-    }
+    const docRef = await db.collection('photos').add({
+      user_id: userId,
+      cloudinary_public_id: uploadResult.public_id,
+      cloudinary_url: uploadResult.secure_url,
+      uploaded_at: admin.firestore.FieldValue.serverTimestamp(),
+    });
 
     res.status(201).json({
-      id: photo.id,
-      cloudinary_url: photo.cloudinary_url,
+      id: docRef.id,
+      cloudinary_url: uploadResult.secure_url,
     });
   } catch (err) {
     console.error('uploadPhoto error:', err);
