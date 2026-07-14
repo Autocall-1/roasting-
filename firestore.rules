@@ -1,0 +1,28 @@
+rules_version = '2';
+
+// Firestore Security Rules — replaces the Postgres RLS policies from the
+// Supabase version. These only govern DIRECT client access to Firestore.
+// The backend server uses the Admin SDK, which bypasses these rules entirely
+// (that's expected — the backend is the trusted context).
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    match /profiles/{userId} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      // Never allow clients to write their own plan — only the backend
+      // (via Admin SDK, after verifying a real payment) should set plan/plan_expires_at.
+      allow write: if false;
+    }
+
+    match /photos/{photoId} {
+      allow read: if request.auth != null && request.auth.uid == resource.data.user_id;
+      // All writes go through the backend (Cloudinary upload + Firestore write together).
+      allow write: if false;
+    }
+
+    match /entertainment_results/{resultId} {
+      allow read: if request.auth != null && request.auth.uid == resource.data.user_id;
+      allow write: if false;
+    }
+  }
+}
